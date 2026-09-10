@@ -1,0 +1,4 @@
+interface:
+  display_name: "文献组会 PPT · 一步成稿"
+  short_description: "上传论文后直接生成正式组会 PPTX 与 PDF，缓存原图并减少重复修改"
+  default_prompt: "使用 $journal-club-ppt，把上传的文献直接制作成最终可汇报的 PPTX 和 PDF，采用图文平衡版式，中间不需要逐步确认。"
