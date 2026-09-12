@@ -39,7 +39,8 @@ def auto_boxes(keys,assets,root,area,groups=None):
     for j,group in enumerate(groups):
         ratios=[]
         for k in group:
-            iw,ih=Image.open(local(root,assets[k]['path'])).size;ratios.append(iw/ih)
+            with Image.open(local(root,assets[k]['path'])) as original:iw,ih=original.size
+            ratios.append(iw/ih)
         height=min(rh,(w-gap*(len(group)-1))/sum(ratios))
         if height<=0:raise ValueError('Too many panels for the automatic layout; supply figures[].box')
         widths=[r*height for r in ratios];cx=x+(w-sum(widths)-gap*(len(group)-1))/2
@@ -67,7 +68,9 @@ def build(root,selection=None):
         sh=sl.shapes.add_connector(MSO_CONNECTOR.STRAIGHT,Inches(x1),Inches(y1),Inches(x2),Inches(y2));sh.line.color.rgb=RGBColor.from_string(color);sh.line.width=Pt(width)
         for e in sh._element.xpath('.//a:effectRef'):e.set('idx','0')
     def image(sl,key,box,sid):
-        a=assets[key];path=local(root,a['path']);iw,ih=Image.open(path).size;x,y,w,h=box;k=min(w/iw,h/ih);pw,ph=iw*k,ih*k;xx=x+(w-pw)/2;yy=y+(h-ph)/2
+        a=assets[key];path=local(root,a['path'])
+        with Image.open(path) as original:iw,ih=original.size
+        x,y,w,h=box;k=min(w/iw,h/ih);pw,ph=iw*k,ih*k;xx=x+(w-pw)/2;yy=y+(h-ph)/2
         sh=sl.shapes.add_picture(str(path),Inches(xx),Inches(yy),width=Inches(pw),height=Inches(ph));sh.name='Asset '+key
         sh._element.xpath('./p:nvPicPr/p:cNvPr')[0].set('descr',str({k:a[k] for k in ['kind','page','panel','readout','sha256'] if k in a}))
         records.append({'slide_id':sid,'asset':key,'sha256':a['sha256'],'kind':a['kind'],'box':[xx,yy,pw,ph]})
@@ -97,7 +100,18 @@ def build(root,selection=None):
             for key,box in placements:image(sl,key,box,sid)
             nodes=s.get('chain',[])
             if kind=='concept' and not placements and not nodes:raise ValueError('Concept page needs an image or native chain: '+sid)
-            if nodes:
+            if nodes and (kind!='concept' or not wide or placements):
+                raise ValueError('Native diagrams require kind concept, layout wide, and no figure/image: '+sid)
+            if nodes and s.get('diagram')=='evidence-grid':
+                if len(nodes)!=4:raise ValueError('evidence-grid needs exactly four evidence levels: '+sid)
+                for j,node in enumerate(nodes):
+                    x=.65+(j%2)*7.58;y=1.90+(j//2)*1.64
+                    rect(sl,x,y,7.12,1.38,theme['pale'])
+                    rect(sl,x,y,.055,1.38,burg if j>1 else theme['sage'])
+                    text(sl,x+.2,y+.18,2.0,.49,node['label'],20,navy,True)
+                    text(sl,x+2.25,y+.18,4.62,.96,node.get('detail',''),20,gray)
+            elif nodes:
+                if not 2<=len(nodes)<=6:raise ValueError('Use two to six short native diagram nodes: '+sid)
                 step=14.7/len(nodes)
                 for j,node in enumerate(nodes):
                     x=.65+j*step;rect(sl,x,2.25,step-.28,1.85,theme['pale']);text(sl,x+.10,2.51,step-.48,.46,node['label'],20,navy,True);text(sl,x+.10,3.13,step-.48,.60,node.get('detail',''),18,gray)
@@ -122,28 +136,48 @@ def build(root,selection=None):
     if not selection:save(root/'build/baseline.json',{'slide_hashes':fingerprints(deck,theme,assets),'order':[s['id'] for s in all_slides],'pptx_sha256':sha(out)})
     (out.parent/(out.stem+'.notes.md')).write_text('\n\n'.join(f"## {n}. {all_slides[n-1]['title']}\n\n{all_slides[n-1].get('notes','')}" for n in chosen),encoding='utf8')
     print(str(out))
-def export(root,soffice,input_path=None):
+def export(root,soffice=None,input_path=None):
     inp=input_path.resolve() if input_path else root/'build/deck.pptx'
     if not inp.exists():raise ValueError('PPTX missing')
-    if not Path(soffice).is_file():raise ValueError('Renderer path does not exist; locate the installed soffice executable before retrying')
+    from check_environment import select_renderer
+    renderer=select_renderer(soffice)
+    if not renderer:raise ValueError('PDF renderer missing. Configure LibreOffice or use installed Windows PowerPoint; PPTX is preserved.')
     out=root/'output';out.mkdir(exist_ok=True);profile=(root/'cache/lo-profile').resolve().as_uri()
-    cmd=[str(soffice),'-env:UserInstallation='+profile,'--headless','--nologo','--nodefault','--nofirststartwizard','--norestore','--convert-to','pdf','--outdir',str(out),str(inp)]
+    target=out/(inp.stem+'.pdf');before=sha(inp)
+    if renderer['kind']=='libreoffice':
+        cmd=[renderer['executable'],'-env:UserInstallation='+profile,'--headless','--nologo','--nodefault','--nofirststartwizard','--norestore','--convert-to','pdf','--outdir',str(out),str(inp)]
+    else:
+        cmd=[renderer['executable'],'-NoProfile','-NonInteractive','-ExecutionPolicy','RemoteSigned','-File',str(Path(__file__).with_name('export_powerpoint.ps1')),'-InputPath',str(inp),'-OutputPath',str(target)]
     print('Exporting actual PPTX to PDF...',flush=True)
-    r=subprocess.run(cmd,capture_output=True,text=True,encoding='utf8',errors='replace',timeout=240,creationflags=0x08000000 if os.name=='nt' else 0)
-    target=out/(inp.stem+'.pdf')
+    env=os.environ.copy();env['SAL_USE_VCLPLUGIN']='svp'
+    r=subprocess.run(cmd,capture_output=True,text=True,encoding='utf8',errors='replace',timeout=240,env=env,creationflags=0x08000000 if os.name=='nt' else 0)
     if r.returncode or not target.exists() or target.stat().st_mtime_ns<inp.stat().st_mtime_ns:raise RuntimeError(r.stdout+'\n'+r.stderr)
-    save(root/f'build/{inp.stem}.export.json',{'pptx':str(inp),'pptx_sha256':sha(inp),'pdf':str(target),'pdf_sha256':sha(target),'created_at':utc()});print(str(target))
+    if sha(inp)!=before:raise RuntimeError('Source PPTX changed while exporting')
+    save(root/f'build/{inp.stem}.export.json',{'pptx':str(inp),'pptx_sha256':before,'pdf':str(target),'pdf_sha256':sha(target),'renderer':renderer['kind'],'created_at':utc()});print(str(target))
+def record_export(root,pdf,expected_hash):
+    """Bind a PDF exported from the current PPTX by an external, real Office renderer."""
+    import shutil
+    inp=root/'build/deck.pptx'
+    if sha(inp)!=expected_hash:raise ValueError('PPTX changed since external export began')
+    doc=fitz.open(pdf)
+    if len(doc)!=len(Presentation(inp).slides):raise ValueError('External PDF page count differs from PPTX')
+    doc.close();out=root/'output/deck.pdf';out.parent.mkdir(exist_ok=True)
+    if Path(pdf).resolve()!=out.resolve():shutil.copy2(pdf,out)
+    save(root/'build/deck.export.json',{'pptx':str(inp),'pptx_sha256':sha(inp),'pdf':str(out),'pdf_sha256':sha(out),'renderer':'external: actual PPTX export required','created_at':utc()})
+    print('External PDF registered; raster and audit are still required.')
 def raster(root,pdf,selection=None):
     doc=fitz.open(pdf);out=root/'output'/f'{pdf.stem}_renders';out.mkdir(parents=True,exist_ok=True);chosen=pages(selection,len(doc))
     for n in chosen:
         pg=doc[n-1];pg.get_pixmap(matrix=fitz.Matrix(1920/pg.rect.width,1920/pg.rect.width),alpha=False).save(out/f'slide-{n:03d}.png')
     save(out/'render_manifest.json',{'pdf_sha256':sha(pdf),'page_count':len(doc),'rendered_pages':chosen,'renders':{str(n):sha(out/f'slide-{n:03d}.png') for n in chosen}});print(str(out))
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('command',choices=['changes','build','export','raster']);ap.add_argument('--workspace',required=True,type=Path);ap.add_argument('--pages');ap.add_argument('--soffice',type=Path);ap.add_argument('--input',type=Path);ap.add_argument('--pdf',type=Path);a=ap.parse_args();root=a.workspace.resolve()
+    ap=argparse.ArgumentParser();ap.add_argument('command',choices=['changes','build','export','raster','record-export']);ap.add_argument('--workspace',required=True,type=Path);ap.add_argument('--pages');ap.add_argument('--soffice',type=Path);ap.add_argument('--input',type=Path);ap.add_argument('--pdf',type=Path);ap.add_argument('--pptx-sha256');a=ap.parse_args();root=a.workspace.resolve()
     if a.command=='changes':print(__import__('json').dumps(changes(root),ensure_ascii=False))
     elif a.command=='build':build(root,a.pages)
     elif a.command=='export':
-        if not a.soffice:ap.error('--soffice required')
         export(root,a.soffice,a.input)
+    elif a.command=='record-export':
+        if not a.pdf or not a.pptx_sha256:ap.error('--pdf and --pptx-sha256 required')
+        record_export(root,a.pdf,a.pptx_sha256)
     else:raster(root,a.pdf or root/'output/deck.pdf',a.pages)
 if __name__=='__main__':main()

@@ -46,7 +46,11 @@ def init(root,paper):
         save(root/'state.json',{'paper':{'path':'source/paper.pdf','sha256':h},'phase':'reading','completed':['source_cached'],'pending':['scientific_reading','figure_inventory','slide_plan','build','render_review'],'next_action':'Read cache/index.json and relevant cached pages; inspect all original figure pages','updated_at':utc()})
     for name,value in [('assets.json',{}),('figure_inventory.json',[])]:
         if not (root/name).exists():save(root/name,value)
-    if not (root/'theme.json').exists():shutil.copy2(SKILL/'assets/theme.json',root/'theme.json')
+    if not (root/'theme.json').exists():
+        from check_environment import find_font
+        font=find_font()
+        if not font:raise ValueError('No usable CJK font; run scripts/run.py doctor and configure --font-file with setup.py')
+        theme=load(SKILL/'assets/theme.json');theme.update(font=font['family'],font_file=font['file'],font_index=font['index']);save(root/'theme.json',theme)
     idx=load(index)
     print(json.dumps({'workspace':str(root),'cache_hit':bool(files_ok),'page_count':len(idx['pages']),'low_text_pages':[v['page'] for v in idx['pages'] if v['text_chars']<100],'index':str(index)},ensure_ascii=False))
 def crop(root,request):
@@ -65,7 +69,7 @@ def crop(root,request):
             reused.append(key);continue
         target.parent.mkdir(exist_ok=True);pix=doc[pg-1].get_pixmap(matrix=fitz.Matrix(dpi/72,dpi/72),clip=box,alpha=False);pix.save(target)
         assets[key]={'path':f'assets/{key}.png','sha256':sha(target),'kind':'evidence','page':pg,'rect':list(box),'dpi':dpi,'pixels':[pix.width,pix.height],
-            'source_sha256':state['paper']['sha256'],'source_signature':signature,'panel':job.get('panel',key),'readout':job.get('readout','')}
+            'source_sha256':state['paper']['sha256'],'source_signature':signature,'pymupdf_version':fitz.VersionBind,'panel':job.get('panel',key),'readout':job.get('readout','')}
         changed.append(key)
     save(root/'assets.json',assets);print(json.dumps({'extracted':changed,'reused':reused},ensure_ascii=False))
 def main():

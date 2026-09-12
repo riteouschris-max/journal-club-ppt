@@ -1,0 +1,5 @@
+# Tested baseline for Python 3.10-3.13; runtime is isolated from other skills.
+PyMuPDF==1.26.7
+Pillow==11.3.0
+python-pptx==1.0.2
+fonttools==4.59.1

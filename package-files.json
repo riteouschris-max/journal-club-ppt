@@ -1,0 +1,11 @@
+[
+  "SKILL.md", "README.md", "requirements.txt", ".gitignore", "package-files.json", "install.py", "setup.py",
+  "agents/openai.yaml", "assets/theme.json",
+  "references/build-and-check.md", "references/paper-to-deck.md", "references/revision.md",
+  "references/visual-standard.md", "references/independence.md",
+  "scripts/project.py", "scripts/render_deck.py", "scripts/audit.py",
+  "scripts/check_environment.py", "scripts/run.py", "scripts/verify_source_pixels.py",
+  "scripts/export_powerpoint.ps1", "scripts/make_demo.py",
+  "examples/deck.json", "examples/result-side.png", "examples/evidence-grid.png", "examples/validation.md",
+  "tests/test_portability.py"
+]

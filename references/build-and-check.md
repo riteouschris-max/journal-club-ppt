@@ -4,7 +4,9 @@
 
 ## 项目与输入
 
-调用 `load_workspace_dependencies` 获取 Python 路径。先检查 `import pymupdf, pptx, PIL`。缺包时优先使用现有演示文稿运行环境，不反复安装软件；不要把本机的 Python 路径写进新项目源码。
+优先用 `scripts/run.py doctor` 检查；缺包时运行根目录 `setup.py`。后续 `run.py` 自动调用本技能 `.venv`，没有 `.venv` 时才使用当前解释器。只需要本技能列出的依赖，不读取其他技能的运行环境。`load_workspace_dependencies` 是可用时的 Python 定位帮助，不是硬依赖。
+
+以下 `python` 应使用本技能 `.venv` 的解释器，或通过 `run.py project ...`、`run.py build ...`、`run.py audit ...` 包装。新项目自动选用实际存在的中文字体，写入项目 theme；已有项目字体不被静默替换。换设备后重新 doctor，若项目里的 `font_file` 已失效，更新到实际字体并重新全套渲染检查。
 
 Windows 上为中文文件启用 `PYTHONUTF8=1` 和 `PYTHONIOENCODING=utf-8`。渲染器路径先检查是否存在；项目目录可能被移动，不能反复调用失效旧路径。
 
@@ -70,6 +72,7 @@ python SKILL/scripts/project.py crop --workspace WORK --request WORK/crops.json
 - 密集图可使用 `figures: [{"asset":"F2_A","box":[x,y,w,h]}]`；坐标单位英寸，原图仍等比 contain，脚本不裁数据。所有 figures 同时用 box 或同时用自动模式。
 - 结果页可用图域：side `[.65,1.77,8.05,5.36]`；wide `[.65,1.72,14.70,3.50]`。避免向标题、解释或页脚侵占。
 - `kind: concept` 使用相同解释/页脚，可用 `image` 引用概念图，或 `chain: [{"label":"阶段","detail":"证据类型"}]` 画可编辑流程；chain 使用 wide 布局。不要把所有概念页都变成相同卡片。
+- 原生流程为 2–6 个简短节点；总结页可用 `diagram: evidence-grid` 和正好 4 个节点组成两行两列证据关系图。原生图必须 `kind: concept`、`layout: wide`，不与 image/figures 叠放。可运行例子见 `examples/deck.json`。
 - 默认首页用 `kind: paper-cover`，填写 `id`、`title`、`image` 和 `notes`。`image` 指向从原 PDF 首页渲染/裁切并登记来源的截图（`kind: evidence`）；沿用裁图缓存与来源哈希，无需加入实验 panel 清单。截图等比放在 `[.65,.55,14.70,7.90]` 区域，`title` 仅用于目录/备注，不在截图上重复绘制。先看原页后确定截图区域，保证期刊、题目和作者完整清楚。
 - 用户另选设计式封面时，`kind: cover` 使用 `title`、`subtitle`、`citation`、可选 `image`。已提供完整封面图片且要求不改可用 `kind: locked-image`、`image`、`locked: true`。已有可编辑封面使用原工程保留，不用截图替换。
 - 自定义复杂概念图时复用脚本的文本/图像函数或原工程组件，不把整套重新写一遍。
@@ -82,7 +85,7 @@ python SKILL/scripts/render_deck.py export --workspace WORK --soffice SOFFICE --
 python SKILL/scripts/render_deck.py raster --workspace WORK --pdf WORK/output/proof.pdf
 ```
 
-这是内部样张检查，不要求用户审批；修好三个代表页后直接批量生成。`SOFFICE` 使用已安装 LibreOffice 的实际路径，脚本使用项目专属 profile，不接管用户打开的 Office 会话。也可使用已有可靠 PPTX 渲染器，但须记录实际输出的哈希。
+这是内部样张检查，不要求用户审批；修好代表页后直接批量生成。`--soffice` 可省略，自动发现 LibreOffice，Windows 无 LibreOffice 时尝试已安装的 PowerPoint。LibreOffice 使用项目专属 profile；PowerPoint 在已经打开时停止，不接管用户演示文稿。需要手动路径时只配置实际存在的程序。
 
 ```text
 python SKILL/scripts/render_deck.py build --workspace WORK
@@ -92,6 +95,18 @@ python SKILL/scripts/audit.py --workspace WORK
 ```
 
 完整文件为 `build/deck.pptx`、`output/deck.pdf`，备注同时写入 PPTX 与 `build/deck.notes.md`。带 `--pages` 的输出始终是 proof，不能当作完整交付。
+
+一次运行上述四步可用 `python SKILL/scripts/run.py finish --workspace WORK`。随后运行 `python SKILL/scripts/verify_source_pixels.py --workspace WORK`，查看实际渲染并修正发现的问题。命令成功不代表视觉或科学审查已经通过。
+
+宿主已有其他可靠导出方式时，先记录当前 PPTX 的 SHA256，再将该 PPTX 真正导出 PDF，然后运行：
+
+```text
+python SKILL/scripts/render_deck.py record-export --workspace WORK --pdf ACTUAL_EXPORTED.pdf --pptx-sha256 HASH_RECORDED_BEFORE_EXPORT
+python SKILL/scripts/render_deck.py raster --workspace WORK
+python SKILL/scripts/audit.py --workspace WORK
+```
+
+登记命令检查页数和 PPTX 是否变化，不证明 PDF 是由该 PPTX 导出的；调用方必须确保真实导出，不使用另行绘制的 PDF 或旧文件冒充。所有导出器缺失时保存 `pending_export` 检查点，交代 PPTX 已生成、PDF 和视觉检查未完成。
 
 脚本不自动缩小字号；溢出时修改文字或布局，必要时在授权范围内调整分组。主要组别/轴仍看不清时继续修，不能只用高 DPI 宣称现场可读。
 
@@ -117,7 +132,7 @@ python SKILL/scripts/audit.py --workspace WORK --reviewed-pages all
 
 局部修改可写 `--reviewed-pages 5-7`。未改页只有当前 PNG 哈希与上次已审 PNG 一致时才复用视觉检查；变化后自动失效。`NEEDS_VISUAL_REVIEW` 不是最终 PASS。自动检查不能确认图像真实性、科学推断或物理会场投影效果。
 
-需要更复杂 Office 对象或专业审计时，按需使用已安装 presentation-skill 的相关工具，不默认把所有参考文档重新读一遍。
+标准文献汇报不需要外部技能。复杂动画、嵌入媒体或未支持的特殊 Office 对象属于额外能力；用户确实要求时再选择工具，不把这些工具作为普通制作的隐藏依赖。
 
 检查点：
 

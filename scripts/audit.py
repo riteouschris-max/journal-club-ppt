@@ -52,7 +52,9 @@ def audit(root,snapshot=False,mode='layout',replace=False,reviewed=None):
         if export.get('pptx_sha256')!=sha(ppt) or export.get('pdf_sha256')!=sha(pdf):errors.append('PDF export is stale or unbound')
         if len(doc)!=len(slides):errors.append('PDF page count mismatch')
     else:errors.append('Final PDF missing')
-    fp=Path(t.get('font_file','C:/Windows/Fonts/msyh.ttc'));font_cache={}
+    from check_environment import find_font
+    detected=find_font(t.get('font_file'))
+    fp=Path(detected['file']) if detected else Path('__missing_font__');font_cache={}
     if not fp.exists():warnings.append('Font metrics unavailable: review text wrapping visually or supply theme.font_file')
     for i,sl in enumerate(prs.slides):
         if i>=len(slides):break
@@ -74,7 +76,7 @@ def audit(root,snapshot=False,mode='layout',replace=False,reviewed=None):
                     size=p.font.size.pt if p.font.size else None
                     if size and size<18:errors.append(f'Page{i+1}: authored text below18pt')
                     if size and fp.exists():
-                        if size not in font_cache:font_cache[size]=ImageFont.truetype(str(fp),round(size*4))
+                        if size not in font_cache:font_cache[size]=ImageFont.truetype(str(fp),round(size*4),index=t.get('font_index',0))
                         width=font_cache[size].getlength(p.text)/4/72;rows=max(1,math.ceil(width/max(.01,b[2])))
                         estimate+=rows*size/72*1.16
                 if estimate>b[3]+.10:errors.append(f'Page{i+1}: estimated text overflow: '+sh.text[:36])
